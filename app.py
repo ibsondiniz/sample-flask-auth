@@ -3,10 +3,15 @@ from database import db
 from models.user import User
 from flask_login import LoginManager, login_user, current_user, logout_user, login_required
 import bcrypt
+import os
+from dotenv import load_dotenv
+
+# Configuração vem do .env (modelo em .env.example)
+load_dotenv()
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = "your_secret_key"
-app.config['SQLALCHEMY_DATABASE_URI']= 'mysql+pymysql://root:admin123@127.0.0.1:3306/flask-crud'
+app.config['SECRET_KEY'] = os.environ["SECRET_KEY"]
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ["DATABASE_URL"]
 
 login_manager = LoginManager()
 db.init_app(app)
@@ -17,7 +22,7 @@ login_manager.login_view = 'login'
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(user_id)
+    return db.session.get(User, int(user_id))
 
 @app.route('/login', methods=["POST"])
 def login():
@@ -49,7 +54,7 @@ def create_user():
     password = data.get("password")
     
     if username and password:
-        hashed_password = bcrypt.hashpw(str.encode(password), bcrypt.gensalt())
+        hashed_password = bcrypt.hashpw(str.encode(password), bcrypt.gensalt()).decode()
         user = User(username=username, password=hashed_password, role='user')
         db.session.add(user)
         db.session.commit()
@@ -60,8 +65,8 @@ def create_user():
 @app.route('/user/<int:id_user>', methods=["GET"])
 @login_required
 def read_user(id_user):
-    user = User.query.get(id_user)
-    
+    user = db.session.get(User, id_user)
+
     if user:
         return {"username": user.username}
     
@@ -71,13 +76,14 @@ def read_user(id_user):
 @login_required
 def update_user(id_user):
     data = request.json
-    user = User.query.get(id_user)
-    
+    user = db.session.get(User, id_user)
+
     if id_user != current_user.id and current_user.role == "user":
         return jsonify({"message": "Operação não permitida"}), 403
-        
+
     if user and data.get("password"):
-        user.password = data.get("password")
+        # mesma criptografia do cadastro, senão o login com a senha nova falha
+        user.password = bcrypt.hashpw(str.encode(data.get("password")), bcrypt.gensalt()).decode()
         db.session.commit()
         
         return jsonify({"message": f"Usuário {id_user} atualizado com sucesso"})
@@ -87,8 +93,8 @@ def update_user(id_user):
 @app.route('/user/<int:id_user>', methods=["DELETE"])
 @login_required
 def delete_user(id_user):
-    user = User.query.get(id_user)
-    
+    user = db.session.get(User, id_user)
+
     if current_user.role != 'admin':
         return jsonify({"message": "Operação não permitida"}), 403
     
@@ -103,4 +109,6 @@ def delete_user(id_user):
     return jsonify({"message": "Usuário não encontrado"}), 404
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
